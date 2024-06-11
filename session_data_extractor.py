@@ -173,6 +173,7 @@ def run_instance():
                 )
                 captcha_input.clear()
                 captcha_input.send_keys(captcha_text)
+                logging.error(f"CAPTCHA = {captcha_text}")
                 print(captcha_text)
                 
                 # Click the 'Siguiente' button
