@@ -9,6 +9,7 @@ from io import BytesIO
 from datetime import datetime
 from browsermobproxy import Server
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -16,17 +17,51 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+import zipfile
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
 # Constants
 BROWSERMOB_PROXY_PATH = os.path.join(os.getcwd(), 'browsermob-proxy-2.1.4', 'bin', 'browsermob-proxy')
 JSON_FILE_PATH = 'sessions.json'
 TESSERACT_CMD_PATH = os.path.join(os.getcwd(), 'Tesseract-OCR', 'tesseract.exe')
+CHROMEDRIVER_DIR = os.path.join(os.getcwd(), 'chromedriver')
+CHROMEDRIVER_ZIP = os.path.join(CHROMEDRIVER_DIR, 'chromedriver_win32.zip')
+CHROMEDRIVER_PATH = os.path.join(CHROMEDRIVER_DIR, 'chromedriver-win32', 'chromedriver.exe')
 
 # Set Tesseract OCR executable path
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD_PATH
 
 # Lock for thread-safe file operations
 json_lock = threading.Lock()
+
+def download_latest_chromedriver():
+    """Download and extract the latest chromedriver for Windows."""
+    url = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+    
+    chromedriver_url = data['channels']['Stable']['downloads']['chromedriver'][3]['url']  # 'win32' platform
+
+    # Create directory for chromedriver
+    os.makedirs(CHROMEDRIVER_DIR, exist_ok=True)
+
+    # Download chromedriver
+    logging.info(f"Downloading chromedriver from {chromedriver_url}")
+    response = requests.get(chromedriver_url)
+    response.raise_for_status()
+    with open(CHROMEDRIVER_ZIP, 'wb') as file:
+        file.write(response.content)
+
+    # Extract chromedriver
+    with zipfile.ZipFile(CHROMEDRIVER_ZIP, 'r') as zip_ref:
+        zip_ref.extractall(CHROMEDRIVER_DIR)
+
+    logging.info(f"Chromedriver downloaded and extracted to {CHROMEDRIVER_DIR}")
 
 def initialize_proxy():
     """Start the BrowserMob Proxy server and create a proxy."""
@@ -97,7 +132,9 @@ def run_instance():
         chrome_options = setup_chrome_options(proxy)
         
         # Initialize WebDriver with proxy and capabilities
-        driver = webdriver.Chrome(options=chrome_options)
+        logging.info(f"Starting chromedriver with executable path: {CHROMEDRIVER_PATH}")
+        service = Service(CHROMEDRIVER_PATH)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         
         # Start capturing network traffic
         proxy.new_har('mef', options={'captureHeaders': True, 'captureContent': True})
@@ -155,7 +192,7 @@ def run_instance():
 
                 break
             except:
-                print(f"Wrong CAPTCHA. Trying again...")
+                logging.error(f"Wrong CAPTCHA. Trying again...")
                 tries += 1  # Increment tries on CAPTCHA failure
         
         # Click the 'Siguiente' button
@@ -211,14 +248,14 @@ def run_instance():
         append_to_json(data_to_append, JSON_FILE_PATH)
         
         # Print extracted values
-        print(f"Extracted tabId: {tab_id}")
-        print(f"Extracted tokenId: {token_id}")
-        print(f"Extracted timestamp1: {timestamp1}")
-        print(f"Extracted timestamp2: {timestamp2}")
-        print(f"Extracted JSESSIONID: {cookie}")
+        logging.info(f"Extracted tabId: {tab_id}")
+        logging.info(f"Extracted tokenId: {token_id}")
+        logging.info(f"Extracted timestamp1: {timestamp1}")
+        logging.info(f"Extracted timestamp2: {timestamp2}")
+        logging.info(f"Extracted JSESSIONID: {cookie}")
     
     except:
-        print(f"Something went wrong. Closing the script\n")
+        logging.error(f"Something went wrong. Closing the script\n")
     
     finally:
         # Close the WebDriver
@@ -229,13 +266,14 @@ def run_instance():
 
 def main(num_instances):
     """Main function to run multiple instances in parallel."""
+    download_latest_chromedriver()  # Ensure the latest chromedriver is downloaded
     with ThreadPoolExecutor(max_workers=num_instances) as executor:
         futures = [executor.submit(run_instance) for _ in range(num_instances)]
         for future in as_completed(futures):
             try:
                 future.result()
             except:
-                print(f"Exception occurred.")
+                logging.error(f"Exception occurred.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run multiple instances of the script in parallel.')
