@@ -2,7 +2,10 @@ import re
 import os
 import json
 import argparse
+import logging
+import requests
 import threading
+import zipfile
 import pytesseract
 from PIL import Image
 from io import BytesIO
@@ -17,9 +20,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
-import zipfile
-import logging
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +51,6 @@ def download_latest_chromedriver():
     os.makedirs(CHROMEDRIVER_DIR, exist_ok=True)
 
     # Download chromedriver
-    logging.info(f"Downloading chromedriver from {chromedriver_url}")
     response = requests.get(chromedriver_url)
     response.raise_for_status()
     with open(CHROMEDRIVER_ZIP, 'wb') as file:
@@ -60,8 +59,6 @@ def download_latest_chromedriver():
     # Extract chromedriver
     with zipfile.ZipFile(CHROMEDRIVER_ZIP, 'r') as zip_ref:
         zip_ref.extractall(CHROMEDRIVER_DIR)
-
-    logging.info(f"Chromedriver downloaded and extracted to {CHROMEDRIVER_DIR}")
 
 def initialize_proxy():
     """Start the BrowserMob Proxy server and create a proxy."""
@@ -132,7 +129,6 @@ def run_instance():
         chrome_options = setup_chrome_options(proxy)
         
         # Initialize WebDriver with proxy and capabilities
-        logging.info(f"Starting chromedriver with executable path: {CHROMEDRIVER_PATH}")
         service = Service(CHROMEDRIVER_PATH)
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
@@ -177,6 +173,7 @@ def run_instance():
                 )
                 captcha_input.clear()
                 captcha_input.send_keys(captcha_text)
+                print(captcha_text)
                 
                 # Click the 'Siguiente' button
                 siguiente_button = WebDriverWait(driver, 5).until(
