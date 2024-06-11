@@ -115,6 +115,8 @@ def run_instance():
         tries = 0  # Variable to keep track of CAPTCHA attempts
 
         while True:        
+            if tries == 20:
+                break
             try:
                 # Locate the CAPTCHA image element
                 captcha_image_element = WebDriverWait(driver, 5).until(
