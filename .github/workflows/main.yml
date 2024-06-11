@@ -1,10 +1,11 @@
-name: Uruguay-CI-Data-Extractor
+name: Python CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
