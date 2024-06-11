@@ -1,0 +1,6 @@
+ciuy
+requests
+pytesseract
+Pillow
+browsermob-proxy
+selenium
