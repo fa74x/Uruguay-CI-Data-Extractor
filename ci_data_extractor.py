@@ -11,6 +11,7 @@ import concurrent.futures
 from queue import Queue
 from threading import Lock
 from datetime import datetime, timedelta
+import pandas as pd
 
 # Constants
 JSON_FILE_PATH = 'sessions.json'
@@ -135,26 +136,19 @@ def make_request_and_store_data(ci, token_id, tab_id, cookie):
                                                   html.unescape(find_and_extract_occurrence(line, "value='", 268)))
                 }
                 with LOCK:
-                    CITIZENS_QUEUE.put(data)
+                    append_to_csv(data)
             except ValueError as e:
                 print(f"Error processing line: {e}")
 
-def save_to_csv():
-    """Save the collected data from the queue to a CSV file."""
-    new_entries = []
-    while not CITIZENS_QUEUE.empty():
-        new_entries.append(CITIZENS_QUEUE.get())
-    
-    with LOCK:
-        file_exists = os.path.isfile(CITIZENS_CSV_FILE)
-        with open(CITIZENS_CSV_FILE, 'a', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['CI', 'Nombres', 'Apellidos', 'Nacimiento']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            if not file_exists:
-                writer.writeheader()
-            
-            writer.writerows(new_entries)
+def append_to_csv(data):
+    """Append data to the CSV file."""
+    file_exists = os.path.isfile(CITIZENS_CSV_FILE)
+    with open(CITIZENS_CSV_FILE, 'a', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['CI', 'Nombres', 'Apellidos', 'Nacimiento']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(data)
 
 def process_ci(ci, tab_id, token_id, timestamp1, timestamp2, cookie):
     """Process a single CI by sending it and making a request to store the data."""
@@ -177,6 +171,14 @@ def process_ci_range(range_start, range_end, session, sessions, session_index):
         sessions[session_index]['datetime'] = datetime.now().isoformat()
         with open(JSON_FILE_PATH, 'w', encoding='utf-8') as file:
             json.dump(sessions, file, ensure_ascii=False, indent=4)
+
+def sort_and_deduplicate_csv():
+    """Sort the CSV file by CI in ascending order and drop duplicates."""
+    if os.path.isfile(CITIZENS_CSV_FILE):
+        df = pd.read_csv(CITIZENS_CSV_FILE)
+        df.drop_duplicates(subset='CI', keep='first', inplace=True)
+        df.sort_values(by='CI', inplace=True)
+        df.to_csv(CITIZENS_CSV_FILE, index=False)
 
 def main():
     """Main function to read sessions, process CI ranges, and save the results to a CSV file."""
@@ -225,12 +227,12 @@ def main():
         # Wait for all futures to complete
         concurrent.futures.wait(futures)
     
-    # Save to CSV after all sessions are processed
-    save_to_csv()
-    
     # End the timer and calculate the elapsed time
     end_time = time.time()
     elapsed_time = end_time - start_time
+
+    # Sort and deduplicate the CSV file
+    sort_and_deduplicate_csv()
     
     print(f"All sessions processed in parallel. Execution time: {elapsed_time:.2f} seconds.")
     print(f"Total processed CIs: {processed_ci_count}")

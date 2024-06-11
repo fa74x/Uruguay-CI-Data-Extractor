@@ -2,7 +2,6 @@ import re
 import os
 import json
 import argparse
-import logging
 import requests
 import threading
 import zipfile
@@ -20,9 +19,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
 
 # Constants
 BROWSERMOB_PROXY_PATH = os.path.join(os.getcwd(), 'browsermob-proxy-2.1.4', 'bin', 'browsermob-proxy')
@@ -59,12 +55,19 @@ def download_latest_chromedriver():
     # Extract chromedriver
     with zipfile.ZipFile(CHROMEDRIVER_ZIP, 'r') as zip_ref:
         zip_ref.extractall(CHROMEDRIVER_DIR)
+    
+    # Delete the downloaded zip file
+    os.remove(CHROMEDRIVER_ZIP)
 
-def initialize_proxy():
+def initialize_proxy(port=8080):
     """Start the BrowserMob Proxy server and create a proxy."""
-    server = Server(BROWSERMOB_PROXY_PATH)
-    server.start()
-    return server, server.create_proxy()
+    try:
+        server = Server(BROWSERMOB_PROXY_PATH, options={"port": port})
+        server.start()
+        return server, server.create_proxy()
+    except Exception as e:
+        print(f"Failed to start BrowserMob Proxy server on port {port}. Error: {e}")
+        return None, None
 
 def setup_chrome_options(proxy):
     """Set up Chrome options to use the proxy."""
@@ -119,11 +122,15 @@ def append_to_json(data_to_append, json_file_path):
         with open(json_file_path, 'w', encoding='utf-8') as file:
             json.dump(existing_data, file, ensure_ascii=False, indent=4)
 
-def run_instance():
+def run_instance(manual_captcha=False):
     """Run a single instance of the main program."""
+    driver = None
+    server = None
     try:
         # Start the BrowserMob Proxy server and create a proxy
         server, proxy = initialize_proxy()
+        if server is None or proxy is None:
+            return
         
         # Set up Chrome options
         chrome_options = setup_chrome_options(proxy)
@@ -164,8 +171,11 @@ def run_instance():
                 threshold = 128
                 captcha_image = captcha_image.point(lambda p: p > threshold and 255)
 
-                # Use pytesseract to extract text from the image
-                captcha_text = pytesseract.image_to_string(captcha_image, config='--psm 13 --oem 3 -c tessedit_char_whitelist=0123456789abcdefghijklmnopqrstuvwxyz')[:5]
+                # Use pytesseract to extract text from the image if not manual CAPTCHA
+                if not manual_captcha:
+                    captcha_text = pytesseract.image_to_string(captcha_image, config='--psm 13 --oem 3 -c tessedit_char_whitelist=0123456789abcdefghijklmnopqrstuvwxyz')[:5]
+                else:
+                    captcha_text = input("Please enter the CAPTCHA: ")
 
                 # Enter the CAPTCHA text
                 captcha_input = WebDriverWait(driver, 5).until(
@@ -173,8 +183,6 @@ def run_instance():
                 )
                 captcha_input.clear()
                 captcha_input.send_keys(captcha_text)
-                logging.error(f"CAPTCHA = {captcha_text}")
-                print(captcha_text)
                 
                 # Click the 'Siguiente' button
                 siguiente_button = WebDriverWait(driver, 5).until(
@@ -190,7 +198,6 @@ def run_instance():
 
                 break
             except:
-                logging.error(f"Wrong CAPTCHA. Trying again...")
                 tries += 1  # Increment tries on CAPTCHA failure
         
         # Click the 'Siguiente' button
@@ -227,9 +234,12 @@ def run_instance():
         ci_input = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="CRMRCSPS_NUMERO_DE_DOCUMENTO_STR"][id="E_6648_2"]'))
         )
-        ci_input.send_keys('50885301')
+        ci_input.send_keys('0')
         ci_input.send_keys(Keys.TAB)
         
+        # Wait for the page to finish the request
+        EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="CRMRCSPS_NUMERO_DE_DOCUMENTO_STR"][id="E_6648_2"]'))
+
         # Extract token data from HAR
         har = proxy.har
         filtered_entries, tab_id, token_id, timestamp1, timestamp2, cookie = extract_token_data(har, tries)
@@ -246,35 +256,40 @@ def run_instance():
         append_to_json(data_to_append, JSON_FILE_PATH)
         
         # Print extracted values
-        logging.info(f"Extracted tabId: {tab_id}")
-        logging.info(f"Extracted tokenId: {token_id}")
-        logging.info(f"Extracted timestamp1: {timestamp1}")
-        logging.info(f"Extracted timestamp2: {timestamp2}")
-        logging.info(f"Extracted JSESSIONID: {cookie}")
+        print(f"Extracted tabId: {tab_id}")
+        print(f"Extracted tokenId: {token_id}")
+        print(f"Extracted timestamp1: {timestamp1}")
+        print(f"Extracted timestamp2: {timestamp2}")
+        print(f"Extracted JSESSIONID: {cookie}")
     
-    except:
-        logging.error(f"Something went wrong. Closing the script\n")
+    except Exception as e:
+        print(f"Something went wrong. Closing the script\nError: {e}")
     
     finally:
-        # Close the WebDriver
-        driver.quit()
-        
-        # Stop the proxy server
-        server.stop()
+        if driver:
+            driver.quit()
+        if server:
+            server.stop()
 
-def main(num_instances):
+def main(num_instances, manual_captcha):
     """Main function to run multiple instances in parallel."""
     download_latest_chromedriver()  # Ensure the latest chromedriver is downloaded
     with ThreadPoolExecutor(max_workers=num_instances) as executor:
-        futures = [executor.submit(run_instance) for _ in range(num_instances)]
+        futures = [executor.submit(run_instance, manual_captcha) for _ in range(num_instances)]
         for future in as_completed(futures):
             try:
                 future.result()
-            except:
-                logging.error(f"Exception occurred.")
+            except Exception as e:
+                print(f"Exception occurred: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run multiple instances of the script in parallel.')
-    parser.add_argument('--instances', type=int, default=1, help='Number of instances to run in parallel')
+    parser.add_argument('--instances', type=int, help='Number of instances to run in parallel')
+    parser.add_argument('--port', type=int, default=8080, help='Port for BrowserMob Proxy')
     args = parser.parse_args()
-    main(args.instances)
+
+    if args.instances:
+        main(args.instances, manual_captcha=False)
+    else:
+        download_latest_chromedriver()
+        run_instance(manual_captcha=True)
